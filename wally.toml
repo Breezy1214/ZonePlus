@@ -1,5 +1,5 @@
 [package]
-name = "1foreverhd/zoneplus"
+name = "breezy1214/zoneplus"
 description = "Construct dynamic zones that utilise region checking, raycasting and the new BasePart.CanTouch property to effectively determine players and parts within their boundaries."
 license = "MIT"
 realm = "shared"
