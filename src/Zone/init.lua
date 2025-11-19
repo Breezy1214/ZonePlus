@@ -50,7 +50,7 @@ function Zone.new(container)
 	-- Variable
 	local janitor = Janitor.new()
 	self.janitor = janitor
-	self._updateConnections = janitor:add(Janitor.new(), "destroy")
+	self._updateConnections = janitor:Add(Janitor.new(), "Destroy")
 	self.container = container
 	self.zoneParts = {}
 	self.overlapParams = {}
@@ -79,7 +79,8 @@ function Zone.new(container)
 	ZoneController.updateDetection(self)
 
 	-- Signals
-	self.updated = janitor:add(Signal.new(), "destroy")
+	self.updated = janitor:Add(Signal.new(), "Destroy")
+	self._connectionCounts = {} 
 	local triggerTypes = {
 		"player",
 		"part",
@@ -91,40 +92,68 @@ function Zone.new(container)
 		"exited",
 	}
 	for _, triggerType in pairs(triggerTypes) do
-		local activeConnections = 0
-		local previousActiveConnections = 0
 		for i, triggerEvent in pairs(triggerEvents) do
-			-- this enables us to determine when a developer connects to an event
-			-- so that we can act accoridngly (i.e. begin or end a checker loop)
-			local signal = janitor:add(Signal.new(true), "destroy")
+			local signal = janitor:Add(Signal.new(), "Destroy")
 			local triggerEventUpper = triggerEvent:sub(1, 1):upper() .. triggerEvent:sub(2)
 			local signalName = triggerType .. triggerEventUpper
 			self[signalName] = signal
-			signal.connectionsChanged:Connect(function(increment)
-				if triggerType == "localPlayer" and not localPlayer and increment == 1 then
+			
+			-- Store original Connect method
+			local originalConnect = signal.Connect
+			
+			-- Override Connect to track connections
+			signal.Connect = function(sig, callback)
+				if triggerType == "localPlayer" and not localPlayer then
 					error(("Can only connect to 'localPlayer%s' on the client!"):format(triggerEventUpper))
 				end
-				previousActiveConnections = activeConnections
-				activeConnections += increment
-				if previousActiveConnections == 0 and activeConnections > 0 then
-					-- At least 1 connection active, begin loop
-					ZoneController._registerConnection(self, triggerType, triggerEventUpper)
-				elseif previousActiveConnections > 0 and activeConnections == 0 then
-					-- All connections have disconnected, end loop
-					ZoneController._deregisterConnection(self, triggerType)
+				
+			local currentCount = self._connectionCounts[triggerType] or 0
+			self._connectionCounts[triggerType] = currentCount + 1
+			
+			if currentCount == 0 then
+				-- First connection, register
+				ZoneController._registerConnection(self, triggerType)
+			end
+			
+			local connection = originalConnect(sig, callback)
+			local originalDisconnect = connection.Disconnect				-- Override Disconnect to track disconnections
+				connection.Disconnect = function(conn)
+					if not conn.Connected then
+						return
+					end
+					
+					originalDisconnect(conn)
+					
+					local count = self._connectionCounts[triggerType] or 1
+					self._connectionCounts[triggerType] = count - 1
+					
+					if count - 1 == 0 then
+						-- Last connection disconnected, deregister
+						ZoneController._deregisterConnection(self, triggerType)
+					end
 				end
-			end)
+				
+				return connection
+			end
+			
+			-- Override Once to track connections (Once creates a connection that auto-disconnects)
+			signal.Once = function(sig, callback)
+				return signal.Connect(sig, function(...)
+					callback(...)
+					-- Connection will auto-disconnect via the wrapped callback
+				end)
+			end
 		end
 	end
 
 	-- Setup touched receiver functions where applicable
-	Zone.touchedConnectionActions = {}
+	self.touchedConnectionActions = {}
 	for _, triggerType in pairs(triggerTypes) do
 		local methodName = ("_%sTouchedZone"):format(triggerType)
 		local correspondingMethod = self[methodName]
 		if correspondingMethod then
 			self.trackingTouchedTriggers[triggerType] = {}
-			Zone.touchedConnectionActions[triggerType] = function(touchedItem)
+			self.touchedConnectionActions[triggerType] = function(touchedItem)
 				correspondingMethod(self, touchedItem)
 			end
 		end
@@ -135,9 +164,9 @@ function Zone.new(container)
 
 	-- Register/deregister zone
 	ZoneController._registerZone(self)
-	janitor:add(function()
+	janitor:Add(function()
 		ZoneController._deregisterZone(self)
-	end, true)
+	end)
 
 	return self
 end
@@ -252,7 +281,7 @@ function Zone:_displayBounds()
 			part.CFrame = CFrame.new(boundCFrame)
 			part.Name = boundName
 			part.Parent = workspace
-			self.janitor:add(part, "Destroy")
+			self.janitor:Add(part, "Destroy")
 		end
 	end
 end
@@ -261,7 +290,7 @@ function Zone:_update()
 	local container = self.container
 	local zoneParts = {}
 	local updateQueue = 0
-	self._updateConnections:clean()
+	self._updateConnections:Cleanup()
 
 	local containerType = typeof(container)
 	local holders = {}
@@ -344,10 +373,10 @@ function Zone:_update()
 	end
 	for _, part in pairs(zoneParts) do
 		for _, prop in pairs(partProperties) do
-			self._updateConnections:add(part:GetPropertyChangedSignal(prop):Connect(update), "Disconnect")
+			self._updateConnections:Add(part:GetPropertyChangedSignal(prop):Connect(update), "Disconnect")
 		end
 		verifyDefaultCollision(part)
-		self._updateConnections:add(
+		self._updateConnections:Add(
 			part:GetPropertyChangedSignal("CollisionGroupId"):Connect(function()
 				verifyDefaultCollision(part)
 			end),
@@ -357,7 +386,7 @@ function Zone:_update()
 	local containerEvents = { "ChildAdded", "ChildRemoved" }
 	for _, holder in pairs(holders) do
 		for _, event in pairs(containerEvents) do
-			self._updateConnections:add(
+			self._updateConnections:Add(
 				holder[event]:Connect(function(child)
 					if child:IsA("BasePart") then
 						update()
@@ -430,9 +459,9 @@ function Zone:_formTouchedConnection(triggerType)
 	local touchedJanitorName = "_touchedJanitor" .. triggerType
 	local touchedJanitor = self[touchedJanitorName]
 	if touchedJanitor then
-		touchedJanitor:clean()
+		touchedJanitor:Cleanup()
 	else
-		touchedJanitor = self.janitor:add(Janitor.new(), "destroy")
+		touchedJanitor = self.janitor:Add(Janitor.new(), "Destroy")
 		self[touchedJanitorName] = touchedJanitor
 	end
 	self:_updateTouchedConnection(triggerType)
@@ -445,7 +474,7 @@ function Zone:_updateTouchedConnection(triggerType)
 		return
 	end
 	for _, basePart in pairs(self.zoneParts) do
-		touchedJanitor:add(basePart.Touched:Connect(self.touchedConnectionActions[triggerType], self), "Disconnect")
+		touchedJanitor:Add(basePart.Touched:Connect(self.touchedConnectionActions[triggerType], self), "Disconnect")
 	end
 end
 
@@ -454,7 +483,7 @@ function Zone:_updateTouchedConnections()
 		local touchedJanitorName = "_touchedJanitor" .. triggerType
 		local touchedJanitor = self[touchedJanitorName]
 		if touchedJanitor then
-			touchedJanitor:cleanup()
+			touchedJanitor:Cleanup()
 			self:_updateTouchedConnection(triggerType)
 		end
 	end
@@ -540,7 +569,7 @@ function Zone:_partTouchedZone(part)
 		return
 	end
 
-	local partJanitor = self.janitor:add(Janitor.new(), "destroy")
+	local partJanitor = self.janitor:Add(Janitor.new(), "Destroy")
 	partJanitor:LinkToInstance(part)
 
 	local instanceClassesToIgnore = { Seat = true, VehicleSeat = true }
@@ -570,7 +599,7 @@ function Zone:_partTouchedZone(part)
 		self:_startConsolidatedPartHeartbeat()
 	end
 
-	partJanitor:add(function()
+	partJanitor:Add(function()
 		trackingDict[part] = nil
 		part.CanTouch = true
 		self.totalPartVolume = round((self.totalPartVolume - partVolume), 5)
@@ -663,7 +692,7 @@ end
 function Zone:getCheckerPart()
 	local checkerPart = self.checkerPart
 	if not checkerPart then
-		checkerPart = self.janitor:add(Instance.new("Part"), "Destroy")
+		checkerPart = self.janitor:Add(Instance.new("Part"), "Destroy")
 		checkerPart.Size = Vector3.new(0.1, 0.1, 0.1)
 		checkerPart.Name = "ZonePlusCheckerPart"
 		checkerPart.Anchored = true
@@ -815,7 +844,7 @@ function Zone:trackItem(instance)
 		self.itemsToUntrack[instance] = nil
 	end
 
-	local itemJanitor = self.janitor:add(Janitor.new(), "destroy")
+	local itemJanitor = self.janitor:Add(Janitor.new(), "Destroy")
 	local itemDetail = {
 		janitor = itemJanitor,
 		item = instance,
@@ -824,7 +853,7 @@ function Zone:trackItem(instance)
 	}
 	self.trackedItems[instance] = itemDetail
 
-	itemJanitor:add(
+	itemJanitor:Add(
 		instance.AncestryChanged:Connect(function()
 			if not instance:IsDescendantOf(game) then
 				self:untrackItem(instance)
@@ -882,7 +911,7 @@ function Zone:relocate()
 			zonePart.Parent = relocationContainer
 		end
 	end
-	self.relocationContainer = self.janitor:add(relocationContainer, "Destroy", "RelocationContainer")
+	self.relocationContainer = self.janitor:Add(relocationContainer, "Destroy", "RelocationContainer")
 	relocationContainer.Parent = worldModel
 end
 
