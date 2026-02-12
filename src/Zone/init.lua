@@ -493,7 +493,7 @@ function Zone:_disconnectTouchedConnection(triggerType)
 	local touchedJanitorName = "_touchedJanitor" .. triggerType
 	local touchedJanitor = self[touchedJanitorName]
 	if touchedJanitor then
-		touchedJanitor:cleanup()
+		touchedJanitor:Cleanup()
 		self[touchedJanitorName] = nil
 	end
 end
@@ -535,7 +535,7 @@ function Zone:_startConsolidatedPartHeartbeat()
 						then
 							-- Even after the part has exited the zone, we track it for a brief period of time based upon the criteria
 							-- in the line above to ensure the .touched behaviours are not abused
-							partData.janitor:cleanup()
+							partData.janitor:Cleanup()
 						end
 					elseif not withinZone then
 						partData.verifiedEntrance = false
@@ -549,7 +549,7 @@ function Zone:_startConsolidatedPartHeartbeat()
 				warn("ZonePlus _partTouchedZone error:", err)
 				-- Cleanup on error to prevent leak
 				if partData.janitor then
-					partData.janitor:cleanup()
+					partData.janitor:Cleanup()
 				end
 			end
 		end
@@ -869,7 +869,7 @@ end
 function Zone:untrackItem(instance)
 	local itemDetail = self.trackedItems[instance]
 	if itemDetail then
-		itemDetail.janitor:destroy()
+		itemDetail.janitor:Destroy()
 	end
 	self.trackedItems[instance] = nil
 
@@ -988,11 +988,11 @@ function Zone:onItemExit(...)
 	self:_onItemCallback("itemExited", false, ...)
 end
 
-function Zone:destroy()
+function Zone:Destroy()
 	self:unbindFromGroup()
 	self:_stopConsolidatedPartHeartbeat()
 	self.janitor:destroy()
 end
-Zone.Destroy = Zone.destroy
+Zone.Destroy = Zone.Destroy
 
 return Zone
